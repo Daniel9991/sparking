@@ -1,1 +1,1 @@
-class Neighbor(val id: String)
+class Neighbor(val id: String) extends Serializable

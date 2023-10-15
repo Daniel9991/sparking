@@ -1,6 +1,8 @@
+import au.com.bytecode.opencsv.CSVWriter
 import org.apache.spark._
 import org.apache.spark.rdd.RDD
 
+import java.io.StringWriter
 import scala.collection.mutable.ArrayBuffer
 
 object Main {
@@ -79,11 +81,14 @@ object Main {
         instances
     }
 
+    def sortNeighbors(n1: KNeighbor, n2: KNeighbor): Boolean ={
+        n1.distance < n2.distance
+    }
+
     def main(args: Array[String]): Unit ={
 
         val FILE_PATH = "datasets/idiris.data"
         val k = 3
-        val sortNeighbors = (n1: KNeighbor, n2: KNeighbor) => n1.distance < n2.distance
 
         val data = readCSV(FILE_PATH)
         val instances = data.zipWithIndex.map(tuple => {
@@ -91,6 +96,7 @@ object Main {
             new Instance(index.toString, line.slice(0, 4).map(_.toDouble))
         })
 
+//        Inefficient
         val fullyMappedInstances = instances.cartesian(instances)
             .filter(ins_tuple => ins_tuple._1.id != ins_tuple._2.id)
             .map(ins_tuple => {
@@ -98,28 +104,24 @@ object Main {
                 (ins1.id, new KNeighbor(ins2.id, DistanceFunctions.euclidean(ins1.attributes, ins2.attributes)))
             })
 
-        val x = fullyMappedInstances.combineByKey(
-            _ => new ArrayBuffer[KNeighbor],
-            (acc: ArrayBuffer[KNeighbor], neighbor) => {
-                if(acc.length < k){
-                    acc.addOne(neighbor)
-                    acc.sortWith(sortNeighbors)
-                }
-                else if(neighbor.distance < acc.last.distance){
-                    acc(k - 1) = neighbor
-                    acc.sortWith(sortNeighbors)
-                }
-                else{
-                    acc
-                }
-            },
-            (acc1: ArrayBuffer[KNeighbor], acc2: ArrayBuffer[KNeighbor]) => {
-                acc1.addAll(acc2)
-                acc1.sortWith(sortNeighbors).slice(0, k)
-            }
-        ).mapValues(neighbors => neighbors.toArray)
+        val groupedCombinations = fullyMappedInstances.groupByKey()
+        val x = groupedCombinations.map(tuple => {
+            val (instanceId, neighbors) = tuple
+            (instanceId, neighbors.toArray.sortWith((n1, n2) => n1.distance < n2.distance).slice(0, k))
+        })
 
-        val first = x.filter(inst_tuple => inst_tuple._1 == "0").first()
-        println(s"Instance with id ${first._1} has neighbors ${first._2.map(neighbor => s"id: ${neighbor.id} - dist: ${neighbor.distance}").mkString("{\n", ",\n", "\n}")}")
+        val neighborReferences = x.flatMap(tuple => {
+            val (instanceId, neighbors) = tuple
+            neighbors.map(neighbor => {
+                if(neighbor.id == "0") println("El vecino era 0")
+                (neighbor.id, instanceId)}
+            )
+        })
+
+        val y = neighborReferences.groupByKey()
+            .mapValues(rNeighbors => rNeighbors.map(
+                    rNeighbor => new Neighbor(rNeighbor)
+            ).toArray)
+
     }
 }
