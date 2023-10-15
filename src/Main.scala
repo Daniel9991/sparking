@@ -20,35 +20,6 @@ object Main {
         sum.toInt
     }
 
-//    def findKNeighborsForAll(instances: RDD[Instance], k: Int): RDD[Instance]={
-//
-//        val instancesWithKNeighbors = instances.map(instance => {
-//            val kNeighbors = new ArrayBuffer[KNeighbor]
-//
-//            instances.foreach(otherInstance => {
-//
-//                if(instance.id != otherInstance.id) {
-//
-//                    val distance = DistanceFunctions.euclidean(instance.attributes, otherInstance.attributes)
-//
-//                    if(kNeighbors.length < k){
-//                        kNeighbors.addOne(new KNeighbor(otherInstance.id, distance))
-//                        kNeighbors.sortWith((n1, n2) => n1.distance < n2.distance)
-//                    }
-//                    else if(distance < kNeighbors.last.distance){
-//                        kNeighbors(kNeighbors.length - 1) = new KNeighbor(otherInstance.id, distance)
-//                        kNeighbors.sortWith((n1, n2) => n1.distance < n2.distance)
-//                    }
-//                }
-//            })
-//
-//            instance.kNeighbors = kNeighbors.toArray
-//            instance
-//        })
-//
-//        instancesWithKNeighbors
-//    }
-
     def findKNeighborsForAll(instances: RDD[Instance], k: Int): RDD[Instance]={
 
         instances.foreach(instance => {
@@ -85,15 +56,23 @@ object Main {
         n1.distance < n2.distance
     }
 
+    def normalizeReverseNeighborsCount(count: Int): Double = {
+        if(count == 0)
+            1.0
+        else
+            1.0 / count.toDouble
+    }
+
     def main(args: Array[String]): Unit ={
 
-        val FILE_PATH = "datasets/idiris.data"
-        val k = 3
+        val FILE_PATH = "datasets/Iris-virginica_Iris-setosa_4.csv"
+        val k = 21
+        val topN = 6
 
         val data = readCSV(FILE_PATH)
         val instances = data.zipWithIndex.map(tuple => {
             val (line, index) = tuple
-            new Instance(index.toString, line.slice(0, 4).map(_.toDouble))
+            new Instance(index.toString, line.slice(0, 4).map(_.toDouble), line.last)
         })
 
 //        Inefficient
@@ -112,10 +91,7 @@ object Main {
 
         val neighborReferences = x.flatMap(tuple => {
             val (instanceId, neighbors) = tuple
-            neighbors.map(neighbor => {
-                if(neighbor.id == "0") println("El vecino era 0")
-                (neighbor.id, instanceId)}
-            )
+            neighbors.map(neighbor => (neighbor.id, instanceId))
         })
 
         val y = neighborReferences.groupByKey()
@@ -123,5 +99,22 @@ object Main {
                     rNeighbor => new Neighbor(rNeighbor)
             ).toArray)
 
+        val antihubValues = y.mapValues(reverseNeighbors => normalizeReverseNeighborsCount(reverseNeighbors.length))
+
+        val sortedAntihubValues = antihubValues.sortBy(_._2, ascending = false)
+        val anomalousIds = sortedAntihubValues.take(topN).map(tuple => tuple._1)
+        anomalousIds.foreach(id => println(id))
+
+        val results = antihubValues.map(tuple => (tuple._1, if(anomalousIds.contains(tuple._1)) "Iris-setosa" else "Iris-virginica"))
+
+        val realClasifications = instances.map(instance => (instance.id, instance.classification))
+        val realAndResults = results.join(realClasifications).sortBy(tuple => tuple._1.toInt)
+
+        realAndResults.foreach(tuple => {
+            val (id, classifications) = tuple
+            val (result, real) = classifications
+
+            println(s"instance ${id} is ${real} and was ${result}: ${if (real == result) "match" else "no match" }")
+        })
     }
 }
